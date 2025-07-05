@@ -5,7 +5,6 @@ import pandas as pd
 from typing import TypedDict, List
 from streamlit import cache_data, cache_resource
 
-# MUDANÇA IMPORTANTE: Corrigindo o caminho de importação da classe Document
 from langchain_core.documents import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import Chroma
@@ -19,7 +18,6 @@ __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
-# --- Definição do Estado e Estruturas de Dados ---
 class AgentState(TypedDict):
     question: str
     chat_history: list
@@ -43,14 +41,19 @@ def load_and_preprocess_data(folder_path):
         if filename.endswith('.csv'):
             file_path = os.path.join(folder_path, filename)
             try:
-                df = pd.read_csv(file_path)
+                # CORREÇÃO CRÍTICA AQUI: Adicionado sep=';' para ler o arquivo corretamente
+                df = pd.read_csv(file_path, sep=';')
+                
                 if "text" in df.columns and "product" in df.columns:
                     if filename == 'info_oficial.csv':
                         df['text'] = '[FONTE OFICIAL]: ' + df['text'].astype(str)
                     else:
                         df['text'] = '[OPINIÃO DE USUÁRIO]: ' + df['text'].astype(str)
                     all_dataframes.append(df)
+                else:
+                    print(f"-> AVISO: Arquivo '{filename}' ignorado. Colunas 'text' e 'product' não encontradas (verifique se o separador é ';').")
             except Exception as e: print(f"Erro ao ler '{filename}': {e}")
+            
     if all_dataframes: return pd.concat(all_dataframes, ignore_index=True)
     return pd.DataFrame()
 
@@ -62,8 +65,6 @@ def get_retriever(_dataframe, product_name, api_key):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
     vector_store = Chroma.from_documents(documents, embeddings)
     return vector_store.as_retriever(search_type="mmr", search_kwargs={'k': 8, 'fetch_k': 25})
-
-# --- Nós (Agentes) do Grafo ---
 
 def query_analyzer_node(state: AgentState, llm):
     prompt = f"""Sua tarefa é atuar como um especialista em buscas. Analise a pergunta do usuário e o histórico da conversa para gerar de 2 a 3 variações de busca otimizadas.\nHistórico: {state['chat_history']}\nPergunta do Usuário: {state['question']}"""
@@ -102,7 +103,6 @@ def create_agentic_rag_app(retriever, api_key):
     workflow.add_edge("retriever", "synthesizer")
     workflow.add_edge("synthesizer", END)
     return workflow.compile()
-
 
 @cache_data(show_spinner=False)
 def generate_suggested_questions(api_key, persona_name, product_name):
